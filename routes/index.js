@@ -27,6 +27,49 @@ var results = [];
  return res.json({});
 });
 
+router.put('/api/v1/todos/:type/:name', function(req, res) {
+
+//types:
+//tagname
+//note (name/complete)
+
+    
+    var data = {name: req.body.name, completed: req.body.completed};
+
+    pg.connect(connectionString, function(err, client, done) {
+        
+         // Catch errors
+        if(err) {
+          done();
+          console.log(err);
+          return res.status(500).json({ success: false, data: err});
+        }
+
+        
+        if (req.params.type == 'tagname') {
+            client.query('UPDATE taglist SET tag_name = ($1) WHERE tag_name = ($2)', [data.name, req.params.name]);
+        }
+
+        if (req.params.type == 'note') {
+            if (data.name.length) {
+                client.query('UPDATE notes SET name = ($1) WHERE id = ($2)', [data.name, req.params.name]);
+            }
+
+            if (data.completed.length) {
+                client.query('UPDATE notes SET completed = ($1) WHERE id = ($2)', [data.completed, req.params.name]);
+            }
+        }
+
+
+    });
+
+return res.json({});
+
+});
+
+
+
+
 
 router.post('/api/v1/todos', function(req, res) {
 
@@ -34,7 +77,7 @@ router.post('/api/v1/todos', function(req, res) {
     
     // Grab data from http request
     var data = {name: req.body.name, date: req.body.date, completed: false, tag: req.body.tag, color: req.body.color};
-  // Get a Postgres client from the connection pool
+    // Get a Postgres client from the connection pool
     pg.connect(connectionString, function(err, client, done) {
         
         // Catch errors
@@ -43,31 +86,72 @@ router.post('/api/v1/todos', function(req, res) {
           console.log(err);
           return res.status(500).json({ success: false, data: err});
         }
-        console.log(data.tag.length);
+
+        //Add note, set node id to use later;
+        client.query("INSERT INTO notes(name, date, completed) values($1, $2, $3)", [data.name, data.date, data.completed]);
+
+        var noteId;
+        client.query('SELECT id FROM notes ORDER BY id DESC LIMIT 1', function(err, _data) {
+        if (err) {
+          console.log('A db error occurred: ' + err);
+          return;
+
+          
+        }
+        noteId = _data.rows[0].id;
+        });
+
+        //Add colors to notes
+        
+        client.query('SELECT id FROM colorlist WHERE color_code = '+data.color, function(err, _data) {
+        if (err) {
+          console.log('A db error occurred: ' + err);
+          return;
+        }
+        
+        if(_data.rows.length) { //if color exist then use it, else use default color
+              client.query("INSERT INTO notecolor(colorlist_id, note_id) values($1, $2)", [_data.rows[0].id, noteId]);
+        }
+        else {
+             client.query("INSERT INTO notecolor(colorlist_id, note_id) values($1, $2)", [1, noteId]);
+        }
+
+        });
 
 
-        //tags
+        //Add tags to notes
 
-        if (Array.isArray(data.tag)) {
+        if (Array.isArray(data.tag)) { //Chek if tag exist, add tags to tag table
             for (i = 0; i < data.tag.length; i++) {
                 if (data.tag[i].length>0) {
                     client.query("INSERT INTO taglist(tag_name) values($1) ON CONFLICT DO NOTHING", [data.tag[i]]);
+
+
+                    client.query("SELECT id FROM taglist WHERE tag_name = ($1)", [data.tag[i]], function(err, _data) {
+                    if (err) {
+                      console.log('A db error occurred: ' + err);
+                      return;
+                    }
+                    client.query("INSERT INTO notetags(taglist_id, note_id) values($1, $2)", [_data.rows[0].id, noteId]);
+                    });
+
+
                 }
             }
         }
         else {
             if (data.tag.length>0) {
                     client.query("INSERT INTO taglist(tag_name) values($1) ON CONFLICT DO NOTHING", [data.tag]);
-                }
+                    
+                    client.query("SELECT id FROM taglist WHERE tag_name = ($1)", [data.tag], function(err, _data) {
+                    if (err) {
+                      console.log('A db error occurred: ' + err);
+                      return;
+                    }
+                    client.query("INSERT INTO notetags(taglist_id, note_id) values($1, $2)", [_data.rows[0].id, noteId]);
+                    });    
+            }
         }
-
-        //colors
-         
-        // note
-        client.query("INSERT INTO notes(name, date, completed) values($1, $2, $3)", 
-                                                [data.name, data.date, data.completed]);
-
-
 
         var results = [];
         // SQL Query > Select Data
