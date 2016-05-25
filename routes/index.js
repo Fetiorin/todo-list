@@ -67,8 +67,81 @@ return res.json({});
 
 });
 
+router.get('/api/v1/todos', function(req, res) {
 
 
+    var data = {date: req.query.date, completed: req.query.completed, color: req.query.color, tags : req.query.tags};
+    console.log(data.date);
+    if (!data.date) data.date = 'date';
+    if (!data.completed) data.completed = 'completed';
+    if (!data.color) data.color = 'color_code';
+    if (!data.tags) data.tags = '';
+    console.log(data.date + " " + data.completed  + " " + data.color );
+    var results = [];
+
+    // Get a Postgres client from the connection pool
+    pg.connect(connectionString, function(err, client, done) {
+        // Handle connection errors
+        if(err) {
+          done();
+          console.log(err);
+          return res.status(500).json({ success: false, data: err});
+        }
+
+        // SQL Query > Select Data
+                      client.query(`CREATE OR REPLACE VIEW temp AS 
+                                    SELECT notes.*, array_agg(taglist.tag_name) AS tags
+                                    FROM notes
+
+                                    LEFT JOIN notetags
+                                    ON notetags.note_id = notes.id 
+                                    LEFT JOIN  taglist 
+                                    ON notetags.taglist_id = taglist.id GROUP BY 1 ORDER BY date ASC, id ASC;`);
+                      
+                      client.query(`CREATE OR REPLACE VIEW temp2 AS SELECT temp.*, colorlist.color_code
+                                    FROM temp
+                                    LEFT JOIN notecolor
+                                    ON notecolor.note_id = temp.id 
+                                    LEFT JOIN  colorlist 
+                                    ON notecolor.colorlist_id = colorlist.id;`);
+         var query =  client.query("SELECT * FROM temp2 WHERE completed="+data.completed+" AND date="+data.date+" AND color_code="+data.color+" AND '{"+data.tags+"}' <@ tags" );
+
+
+
+        // Stream results back one row at a time
+        query.on('row', function(row) {
+            results.push(row);
+        });
+
+        // After all data is returned, close connection and return results
+        query.on('end', function() {
+            done();
+            return res.json(results);
+        });
+
+    });
+
+});
+
+router.delete('/api/v1/todos/:note_id', function(req, res) {
+
+    var results = [];
+    var id = req.params.note_id;
+
+    pg.connect(connectionString, function(err, client, done) {
+      
+      // Catch errors
+        if(err) {
+          done();
+          console.log(err);
+          return res.status(500).json({ success: false, data: err});
+        }
+
+      
+        client.query("DELETE FROM notes WHERE id=($1)", [id]);
+    });
+return res.json({});
+});
 
 
 router.post('/api/v1/todos', function(req, res) {
